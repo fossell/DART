@@ -140,6 +140,9 @@
                              '../../../observations/forward_operators/obs_def_gps_mod.f90',
                              '../../../observations/forward_operators/obs_def_vortex_mod.f90',
                              '../../../observations/forward_operators/obs_def_gts_mod.f90'
+                             '../../../observations/forward_operators/obs_def_QuikSCAT_mod.f90',
+                             '../../../observations/forward_operators/obs_def_mesonet_mod.f90',
+                             '../../../observations/forward_operators/obs_def_uas_mod.f90'
    /
 
 &obs_kind_nml
