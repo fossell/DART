@@ -846,7 +846,7 @@ end select
 ! obs_def%write_external_FO should be false and no metadata will be written
 ! Also want obs_def%write_external_FO to somehow be true when this called from
 ! the obs_sequence_tool program
-if ( obs_def%has_external_FO .and. obs_def%write_external_FO ) then 
+if ( obs_def%has_external_FO ) then  ! CSS and KRF 
    if ( .not. allocated(obs_def%external_FO)) then
       call error_handler(E_ERR, 'write_obs_def', &
          'obs_def%external_FO not allocated but writing was requested.', &
