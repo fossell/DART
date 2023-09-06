@@ -243,6 +243,8 @@ logical :: allow_perturbed_ics = .false.  ! should spin the model up for a while
 integer :: num_moist_vars
 logical :: surf_obs, soil_data, h_diab
 
+logical :: normalize_scale_height_by_surface_pressure = .true. ! CSS added
+
 ! adv_mod_command moved to dart_to_wrf namelist; ignored here.
 character(len = 72) :: adv_mod_command = ''
 
@@ -258,7 +260,8 @@ namelist /model_nml/ num_moist_vars, &
                      allow_obs_below_vol, vert_localization_coord, &
                      center_search_half_length, center_spline_grid_scale, &
                      circulation_pres_level, circulation_radius, polar, &
-                     periodic_x, periodic_y, scm, allow_perturbed_ics
+                     periodic_x, periodic_y, scm, allow_perturbed_ics, &
+                     normalize_scale_height_by_surface_pressure ! CSS added this line
 
 ! if you need to check backwards compatibility, set this to .true.
 ! otherwise, leave it as false to use the more correct geometric height
@@ -3040,8 +3043,12 @@ do i=1, num
    elseif (wrf%dom(id)%localization_coord == VERTISHEIGHT) then
       lev = model_height_distrib(ip, jp, kp, id, var_type, state_handle)
    elseif (wrf%dom(id)%localization_coord == VERTISSCALEHEIGHT) then
-      lev = -log(model_pressure_distrib(ip, jp, kp, id, var_type, state_handle) / &
-                 model_surface_pressure_distrib(ip, jp, id, var_type, state_handle))
+      if ( normalize_scale_height_by_surface_pressure ) then ! CSS added conditional
+         lev = -log(model_pressure_distrib(ip, jp, kp, id, var_type, state_handle) / &
+                    model_surface_pressure_distrib(ip, jp, id, var_type, state_handle))
+      else ! CSS
+         lev = -log(model_pressure_distrib(ip, jp, kp, id, var_type, state_handle)) ! CSS
+      endif ! CSS
    endif
    
    locs(i) = set_location(lon, lat, lev, wrf%dom(id)%localization_coord)
@@ -3331,24 +3338,26 @@ case (VERTISPRESSURE)
 
    ! get model pressure profile and
    ! get pressure vertical co-ordinate in model level number
-   allocate(v_p(0:wrf%dom(id)%bt)) 
-   !HK This has already been called in model interpolate
-   ! - not for observations that were not in the assimilate catagory
-   call get_model_pressure_profile_distrib(i,j,dx,dy,dxm,dym,wrf%dom(id)%bt,id,v_p, state_handle,1)
+   if ( normalize_scale_height_by_surface_pressure ) then ! CSS added condition
+      allocate(v_p(0:wrf%dom(id)%bt)) 
+      !HK This has already been called in model interpolate
+      ! - not for observations that were not in the assimilate catagory
+      call get_model_pressure_profile_distrib(i,j,dx,dy,dxm,dym,wrf%dom(id)%bt,id,v_p, state_handle,1)
 
-     !if (my_task_id() == 0) then
-     !    write(10, *) v_p
-     !endif
+         if (my_task_id() == 0) then
+             write(10, *) 'v_p = ', v_p
+         endif
 
-   call pres_to_zk(zin, v_p(:), wrf%dom(id)%bt, zk, lev0)
-   deallocate(v_p)
+      call pres_to_zk(zin, v_p(:), wrf%dom(id)%bt, zk, lev0)
+      deallocate(v_p)
+ 
+         if (my_task_id() == 0) then
+             write(10, *) 'zk = ', zk
+         endif
 
-     !if (my_task_id() == 0) then
-     !    write(10, *) zk
-     !endif
-
-   ! if you cannot get a model level out of the pressure profile, bail to end
-   if ( zk == missing_r8 ) goto 100 !HK I don't think zk = missing_r8 even if there is an error
+      ! if you cannot get a model level out of the pressure profile, bail to end
+      if ( zk == missing_r8 ) goto 100 !HK I don't think zk = missing_r8 even if there is an error
+   endif ! End CSS
 
    ! convert into:
    select case (ztypeout)
@@ -3393,26 +3402,30 @@ case (VERTISPRESSURE)
       hgt4 = dzm*hgta + dz*hgtb
       zout = dym*( dxm*hgt1 + dx*hgt2 ) + dy*( dxm*hgt3 + dx*hgt4 )
       
-     !if (my_task_id() == 0) then
-     !    write(10, *) zout
-     !endif
+      if (my_task_id() == 0) then
+          write(10, *) 'zout = ', zout
+      endif
 
    ! -------------------------------------------------------
    ! incoming vertical coordinate is 'pressure' in Pa
    ! outgoing vertical coordinate should be 'scale height' 
    ! -------------------------------------------------------
    case (VERTISSCALEHEIGHT)
-      call toGrid(zk,k,dz,dzm)
+      if ( normalize_scale_height_by_surface_pressure ) then ! CSS added condition
+         call toGrid(zk,k,dz,dzm)
 
-      ! Check that integer height index is in valid range.  if not, bail to end
-      if(.not. boundsCheck(k, .false., id, dim=3, type=wrf%dom(id)%type_t)) goto 100
+         ! Check that integer height index is in valid range.  if not, bail to end
+         if(.not. boundsCheck(k, .false., id, dim=3, type=wrf%dom(id)%type_t)) goto 100
 
-      ! compute surface pressure at all neighboring mass points and interpolate
-      pres1 = model_pressure_s_distrib(ll(1), ll(2), id, state_handle)
-      pres2 = model_pressure_s_distrib(lr(1), lr(2), id, state_handle)
-      pres3 = model_pressure_s_distrib(ul(1), ul(2), id, state_handle)
-      pres4 = model_pressure_s_distrib(ur(1), ur(2), id, state_handle)
-      zout = -log(zin / (dym*( dxm*pres1 + dx*pres2 ) + dy*( dxm*pres3 + dx*pres4 )))
+         ! compute surface pressure at all neighboring mass points and interpolate
+         pres1 = model_pressure_s_distrib(ll(1), ll(2), id, state_handle)
+         pres2 = model_pressure_s_distrib(lr(1), lr(2), id, state_handle)
+         pres3 = model_pressure_s_distrib(ul(1), ul(2), id, state_handle)
+         pres4 = model_pressure_s_distrib(ur(1), ur(2), id, state_handle)
+         zout = -log(zin / (dym*( dxm*pres1 + dx*pres2 ) + dy*( dxm*pres3 + dx*pres4 )))
+      else ! CSS
+         zout = -log(zin) ! CSS ...this seems better and gives answers closer to EnSRF...assumes zin is an OB
+      endif ! CSS
 
    ! -------------------------------------------------------
    ! incoming vertical coordinate is 'pressure'
@@ -3508,12 +3521,15 @@ case (VERTISHEIGHT)
       zout = dym*( dxm*pres1 + dx*pres2 ) + dy*( dxm*pres3 + dx*pres4 )
  
       ! surface pressure
-      pres1 = model_pressure_s_distrib(ll(1), ll(2), id, state_handle)
-      pres2 = model_pressure_s_distrib(lr(1), lr(2), id, state_handle)
-      pres3 = model_pressure_s_distrib(ul(1), ul(2), id, state_handle) 
-      pres4 = model_pressure_s_distrib(ur(1), ur(2), id, state_handle)
-      zout = -log(zout / (dym*( dxm*pres1 + dx*pres2 ) + dy*( dxm*pres3 + dx*pres4 )))
-
+      if ( normalize_scale_height_by_surface_pressure ) then ! CSS added condition
+         pres1 = model_pressure_s_distrib(ll(1), ll(2), id, state_handle)
+         pres2 = model_pressure_s_distrib(lr(1), lr(2), id, state_handle)
+         pres3 = model_pressure_s_distrib(ul(1), ul(2), id, state_handle) 
+         pres4 = model_pressure_s_distrib(ur(1), ur(2), id, state_handle)
+         zout = -log(zout / (dym*( dxm*pres1 + dx*pres2 ) + dy*( dxm*pres3 + dx*pres4 )))
+      else ! CSS
+         zout = -log(zout) ! CSS
+      endif ! CSS
 
    ! -------------------------------------------------------
    ! incoming vertical coordinate is 'height' in meters
